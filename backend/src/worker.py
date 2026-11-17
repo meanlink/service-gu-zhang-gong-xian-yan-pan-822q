@@ -8,6 +8,7 @@ from src.models import Job, Dataset, Report
 from src.services.business import analyze
 from src.services.reports import deliver
 from src.services.audit import record
+from src.services import blind
 logging.basicConfig(level=logging.INFO)
 def execute(job_id):
     with Session() as db:
@@ -15,15 +16,25 @@ def execute(job_id):
         if not j or j.status!='queued':return
         j.status='running'; db.commit()
         try:
-            d=db.get(Dataset,j.dataset_id)
-            result=analyze(d.records,j.params)
+            records=blind.scoped_records(db,j)
+            result=analyze(records,j.params)
             json.dumps(result,allow_nan=False)
             j.result=result;j.status='completed';j.finished_at=time.time()
             record(db,'worker','job.completed',{'id':j.id})
+            if j.blind_scope=='sealed' and j.blind_activity_id:
+                a=db.get(blind.BlindActivity,j.blind_activity_id)
+                if a and a.status=='unblinding':
+                    blind.finalize_unblind(db,a,j)
+                    record(db,'worker','blind.unblinded',{'id':a.id,'job':j.id})
         except Exception as e:
             logging.exception('Analysis failed')
             j.status='failed';j.error=str(e)[:990];j.finished_at=time.time()
             record(db,'worker','job.failed',{'id':j.id,'error':j.error})
+            if j.blind_scope=='sealed' and j.blind_activity_id:
+                a=db.get(blind.BlindActivity,j.blind_activity_id)
+                if a and a.status=='unblinding':
+                    blind.fail_unblind(db,a,j.error)
+                    record(db,'worker','blind.unblind_failed',{'id':a.id,'job':j.id,'error':a.error})
         db.commit()
 def tick():
     with Session() as db:
@@ -40,6 +51,7 @@ def main():
     with Session() as db:
         for j in db.scalars(select(Job).where(Job.status=='running')):
             j.status='queued';record(db,'worker','job.recovered',{'id':j.id})
+        blind.recover(db,record)  # 中断的揭盲恢复原候选，重试不重复揭盲
         db.commit()
     while True:
         Path('/tmp/heartbeat').touch()

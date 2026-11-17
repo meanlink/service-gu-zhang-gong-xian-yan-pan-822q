@@ -2,16 +2,20 @@ import time, os, csv, io, hashlib, json
 from fastapi import HTTPException
 from src.models import Job, Report, Delivery
 from src.config.settings import ARTIFACT_DIR
+from src.services import blind
 def create(db, data):
     j=db.get(Job,data.job_id)
     if not j or j.status!='completed' or not j.approved:
         raise HTTPException(409,'请先选择已完成且获批准的分析结果')
+    reason=blind.job_constraint(db,j)
+    if reason: raise HTTPException(409,'结果处于盲验隔离，暂不能安排分发：'+reason)
     r=Report(name=data.name, job_id=j.id, destination=data.destination, interval_seconds=data.interval_seconds, next_run=time.time()+data.delay_seconds, enabled=True)
     db.add(r); db.flush()
     return r
 def deliver(db, report):
     j=db.get(Job,report.job_id)
     if not j or not j.approved: return
+    if blind.job_constraint(db,j): return  # 隔离期暂停产出归档，揭盲后下一轮恢复
     out=io.StringIO()
     out.write('\ufeff')
     table=j.result.get('table',{})

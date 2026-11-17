@@ -4,7 +4,7 @@ from src.config.database import get_db
 from src.models import Dataset
 from src.schemas.dataset import DatasetInput
 from src.middlewares.auth import current_user, can_write
-from src.services import datasets
+from src.services import datasets, blind
 from src.services.audit import record
 from src.utils.serialization import dataset_dict
 router=APIRouter(prefix='/datasets')
@@ -16,7 +16,12 @@ def create(data:DatasetInput,db=Depends(get_db),u=Depends(can_write)):
     d=datasets.create(db,data); record(db,u.email,'dataset.create',{'id':d.id,'rows':len(d.records)})
     db.commit(); return dataset_dict(d)
 @router.get('/{id}')
-def detail(id:int,db=Depends(get_db),u=Depends(current_user)):
+def detail(id:int,side:str='',db=Depends(get_db),u=Depends(current_user)):
     d=db.get(Dataset,id)
     if not d:raise HTTPException(404,'数据批次不存在')
+    activity=blind.dataset_constraint(db,d.id)
+    if activity:
+        if side=='sealed': raise HTTPException(403,f'封存事件已隔离：批次纳入盲验活动「{activity.name}」，揭盲公布前读取按越权拒绝')
+        records=blind.open_records(db,d,activity)
+        return {**dataset_dict(d),'records':records,'blind':{'activity_id':activity.id,'activity_name':activity.name,'withheld':len(d.records)-len(records),'reason':f'批次纳入盲验活动「{activity.name}」，仅开放调参样本可见，封存事件揭盲前隔离'}}
     return {**dataset_dict(d),'records':d.records}

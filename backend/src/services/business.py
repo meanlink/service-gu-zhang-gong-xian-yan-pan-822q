@@ -14,7 +14,7 @@ def metadata():
         "downstream": "可靠性复盘会对高Jaccard与短时滞的服务对核查调用日志",
         "entities": ["服务复核事件", "时窗关联试验", "可靠性复盘简报"],
         "dataset_name": "桥石五服务本周复核事件序列",
-        "columns": [{"key": "event_id", "label": "复核事件ID", "type": "string"}, {"key": "service", "label": "服务名称", "type": "string"}, {"key": "occurred_min", "label": "周内累计分钟", "type": "number"}, {"key": "severity", "label": "事件等级(1~3)", "type": "number"}],
+        "columns": [{"key": "event_id", "label": "复核事件ID", "type": "string"}, {"key": "incident_id", "label": "事故编号", "type": "string"}, {"key": "service", "label": "服务名称", "type": "string"}, {"key": "occurred_min", "label": "周内累计分钟", "type": "number"}, {"key": "severity", "label": "事件等级(1~3)", "type": "number"}],
         "parameters": [{"key": "window_min", "label": "同窗及跟随窗口(分钟)", "type": "number", "default": 5, "min": 1, "max": 30}, {"key": "min_pairs", "label": "最少跟随事件数", "type": "number", "default": 3, "min": 2, "max": 20}],
         "workbench_title": "服务事件时窗复盘", "action_label": "计算共现与有向时滞", "unit": "个复核事件",
         "accent": "oklch(63% 0.12 155)", "style": "control-room-industrial",
@@ -27,18 +27,19 @@ def metadata():
 def seed_records():
     rng = np.random.default_rng(1013)
     events = []
-    def add(service, minute, severity):
-        events.append({"event_id": f"QS-{len(events)+1:04}", "service": service, "occurred_min": round(float(minute), 2), "severity": int(severity)})
+    def add(service, minute, severity, incident):
+        events.append({"event_id": f"QS-{len(events)+1:04}", "incident_id": incident, "service": service, "occurred_min": round(float(minute), 2), "severity": int(severity)})
     for i in range(55):
+        incident = f"INC-{i+1:03}"
         base = i * 60 + float(rng.uniform(4, 15))
-        add("cache", base, 2)
-        add("api-gateway", base + float(rng.uniform(1.5, 4.5)), 2)
+        add("cache", base, 2, incident)
+        add("api-gateway", base + float(rng.uniform(1.5, 4.5)), 2, incident)
         if i % 3 == 0:
-            add("job-queue", base + float(rng.uniform(6, 11)), 1)
+            add("job-queue", base + float(rng.uniform(6, 11)), 1, incident)
         if i % 4 == 0:
-            add("metrics-db", base - float(rng.uniform(2, 4)), 3)
-    for _ in range(45):
-        add(str(rng.choice(["cache", "api-gateway", "job-queue", "metrics-db", "object-store"])), rng.uniform(0, 3300), rng.integers(1, 4))
+            add("metrics-db", base - float(rng.uniform(2, 4)), 3, incident)
+    for j in range(45):
+        add(str(rng.choice(["cache", "api-gateway", "job-queue", "metrics-db", "object-store"])), rng.uniform(0, 3300), rng.integers(1, 4), f"INC-{101+j:03}")
     return sorted(events, key=lambda row: row["occurred_min"])
 
 

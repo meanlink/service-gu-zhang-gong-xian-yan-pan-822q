@@ -4,10 +4,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from src.config.database import get_db
 from src.config.settings import ARTIFACT_DIR
-from src.models import Report, Delivery
+from src.models import Report, Delivery, Job
 from src.schemas.report import ReportInput
 from src.middlewares.auth import current_user, admin_only
-from src.services import reports
+from src.services import reports, blind
 from src.services.audit import record
 from src.utils.serialization import report_dict, delivery_dict
 router=APIRouter()
@@ -31,6 +31,11 @@ def deliveries(db=Depends(get_db),u=Depends(current_user)):
 def download(id:int,format:str='csv',db=Depends(get_db),u=Depends(current_user)):
     d=db.get(Delivery,id)
     if not d:raise HTTPException(404,'归档不存在')
+    r=db.get(Report,d.report_id)
+    j=db.get(Job,r.job_id) if r else None
+    if j:
+        reason=blind.job_constraint(db,j)
+        if reason:raise HTTPException(403,'归档下载受限：'+reason)
     if format not in ('csv','json'):raise HTTPException(422,'支持 CSV 或 JSON')
     filename=d.filename+('.json' if format=='json' else '')
     p=os.path.join(ARTIFACT_DIR,filename)
